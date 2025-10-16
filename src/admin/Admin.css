@@ -1,0 +1,136 @@
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 12px 15px;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.admin-table th {
+  background-color: #f9fafb;
+  font-weight: 600;
+  color: #374151;
+}
+
+.admin-table tbody tr:hover {
+  background-color: #f9fafb;
+}
+
+.admin-table td {
+  color: #4b5563;
+}
+
+.error-message {
+  color: #fa383e;
+  background-color: #ffebe6;
+  border: 1px solid #fa383e;
+  border-radius: 6px;
+  padding: 10px;
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 14px;
+  text-align: center;
+}
+
+/* --- Admin Dashboard Metrics --- */
+.admin-dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.metric-card {
+  background-color: #fff;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.metric-card h4 {
+  margin: 0 0 0.5rem;
+  color: #6b7280;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.metric-card p {
+  margin: 0;
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+/* --- Admin Toolbar --- */
+.admin-toolbar {
+  margin-bottom: 1.5rem;
+}
+
+.search-input {
+  width: 100%;
+  max-width: 400px;
+  padding: 0.75rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+/* --- Action Buttons --- */
+.action-button {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background-color 0.2s;
+}
+
+.delete-button {
+  background-color: #fee2e2;
+  color: #b91c1c;
+}
+
+.delete-button:hover {
+  background-color: #fecaca;
+}
+
+.update-button {
+  background-color: #dbeafe;
+  color: #1d4ed8;
+}
+
+.update-button:hover {
+  background-color: #bfdbfe;
+}
+
+.credit-input {
+  width: 80px;
+  padding: 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  text-align: center;
+}
+
+/* --- Audit Log Styles --- */
+.log-action {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.log-action.delete_user {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.log-action.update_credits {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
