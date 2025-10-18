@@ -1,3 +1,24 @@
+const defaults = { color: 'blue', size: 'medium' };
+const options = { size: 'large', enabled: true };
+
+// To create a new object without modifying the original ones:
+const finalOptions = Object.assign({}, defaults, options);
+
+// finalOptions is now: { color: 'blue', size: 'large', enabled: true }
+// 'defaults' and 'options' remain unchanged.
+import util from 'util';
+
+const defaults = { color: 'blue', size: 'medium' };
+const options = { size: 'large', enabled: true };
+
+// This mutates the 'defaults' object
+const finalOptions = util._extend(defaults, options);
+// Incorrect: This bypasses the proxy
+fetch('http://localhost:3001/api/some-endpoint')
+  .then(res => res.json());
+// Correct: This uses the proxy defined in your package.json
+fetch('/api/some-endpoint')
+  .then(res => res.json());
 {
   "name": "faceless-ai-app",
   "version": "1.0.0",
@@ -9,13 +30,11 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "express-session": "^1.18.2",
     "mysql2": "^3.10.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.23.1",
-    "react-scripts": "5.0.1",
-    "vue": "^3.5.22"
+    "react-scripts": "5.0.1"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
