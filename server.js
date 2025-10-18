@@ -3,6 +3,8 @@ import mysql from 'mysql2/promise';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
 import dotenv from 'dotenv';
+import session from 'express-session';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 dotenv.config(); // Load environment variables from .env file
 
@@ -12,6 +14,22 @@ const port = 3001;
 // --- Middleware ---
 app.use(cors()); // Enable Cross-Origin Resource Sharing
 app.use(express.json()); // Middleware to parse JSON bodies
+
+// Session Configuration
+const FORTY_FIVE_MINUTES = 1000 * 60 * 45;
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'a-secure-secret-key', // Use an environment variable for this!
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true, // Prevents client-side JS from reading the cookie
+    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
+    maxAge: FORTY_FIVE_MINUTES // Session timeout of 45 minutes
+  }
+}));
+
+// A simple middleware to protect routes
+const isAuthenticated = (req, res, next) => req.session.user ? next() : res.status(401).json({ success: false, message: 'Unauthorized' });
 
 // --- MySQL Database Connection ---
 // Use environment variables for database configuration
@@ -24,6 +42,12 @@ const dbConfig = {
 };
 
 const pool = mysql.createPool(dbConfig);
+
+// --- AI and Job Management Setup ---
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+const jobs = {}; // In-memory job store. In production, use a database or Redis.
 
 // --- API Routes ---
 
@@ -54,8 +78,12 @@ app.post('/api/login', async (req, res, next) => {
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (isMatch) {
-      // In a real app, you would generate and return a JWT here
-      res.json({ success: true, message: 'Login successful!' });
+      // Create a session for the user
+      req.session.user = {
+        id: user.id,
+        username: user.username
+      };
+      res.json({ success: true, message: 'Login successful!', user: req.session.user });
     } else {
       res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
@@ -63,6 +91,33 @@ app.post('/api/login', async (req, res, next) => {
     next(error); // Pass error to the centralized handler
   }
 });
+
+/**
+ * @route   POST /api/logout
+ * @desc    Destroy the user's session
+ */
+app.post('/api/logout', (req, res) => {
+  req.session.destroy(err => {
+    if (err) {
+      return res.status(500).json({ success: false, message: 'Could not log out, please try again.' });
+    }
+    res.clearCookie('connect.sid'); // The default session cookie name
+    res.json({ success: true, message: 'Logout successful.' });
+  });
+});
+
+/**
+ * @route   GET /api/check-session
+ * @desc    Check if a user session is active
+ */
+app.get('/api/check-session', (req, res) => {
+  if (req.session.user) {
+    res.json({ success: true, user: req.session.user });
+  } else {
+    res.status(401).json({ success: false, message: 'No active session.' });
+  }
+});
+
 
 /**
  * @route   POST /api/register
@@ -86,12 +141,8 @@ app.post('/api/register', async (req, res, next) => {
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // Insert the new user into the users table
-    const [result] = await pool.execute('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashedPassword]);
-    const newUserId = result.insertId;
-
-    // Create a corresponding entry in the credit_manage table
-    await pool.execute('INSERT INTO credit_manage (user_id, credits) VALUES (?, ?)', [newUserId, 100]);
+    // Insert the new user into the correct 'users' table
+    await pool.execute('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashedPassword]);
     res.status(201).json({ success: true, message: 'Registration successful! Please log in.' });
   } catch (error) {
     next(error); // Pass error to the centralized handler
@@ -102,15 +153,11 @@ app.post('/api/register', async (req, res, next) => {
  * @route   GET /api/admin/users
  * @desc    Get all users (for admin panel)
  */
-app.get('/api/admin/users', async (req, res, next) => {
+app.get('/api/admin/users', isAuthenticated, async (req, res, next) => {
   // In a real app, this route should be protected to ensure only admins can access it.
   try {
-    // Use the JOIN query to get user data and credits
-    const [users] = await pool.execute(`
-      SELECT u.id, u.username, u.email, u.created_at, cm.credits 
-      FROM users u 
-      LEFT JOIN credit_manage cm ON u.id = cm.user_id
-    `);
+    // Select all users and their credits from the single table
+    const [users] = await pool.execute('SELECT id, username, email, credits, created_at FROM credit_manage');
     res.json(users);
   } catch (error) {
     next(error); // Pass error to the centralized handler
@@ -121,20 +168,20 @@ app.get('/api/admin/users', async (req, res, next) => {
  * @route   DELETE /api/admin/users/:id
  * @desc    Delete a user by ID
  */
-app.delete('/api/admin/users/:id', async (req, res, next) => {
+app.delete('/api/admin/users/:id', isAuthenticated, async (req, res, next) => {
   const { id } = req.params;
   const adminUsername = 'admin'; // In a real app, get this from the authenticated admin's session/token
 
   // In a real app, you might want to prevent an admin from deleting their own account.
   try {
     // First, get user details for logging before deleting
-    const [users] = await pool.execute('SELECT username FROM users WHERE id = ?', [id]);
+    const [users] = await pool.execute('SELECT username FROM credit_manage WHERE id = ?', [id]);
     if (users.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
     const targetUsername = users[0].username;
 
-    const [result] = await pool.execute('DELETE FROM users WHERE id = ?', [id]);
+    const [result] = await pool.execute('DELETE FROM credit_manage WHERE id = ?', [id]);
     if (result.affectedRows === 0) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
@@ -155,7 +202,7 @@ app.delete('/api/admin/users/:id', async (req, res, next) => {
  * @route   PUT /api/admin/users/:id/credits
  * @desc    Update a user's credits
  */
-app.put('/api/admin/users/:id/credits', async (req, res, next) => {
+app.put('/api/admin/users/:id/credits', isAuthenticated, async (req, res, next) => {
   const { id } = req.params;
   const { credits } = req.body;
   const adminUsername = 'admin'; // In a real app, get this from the authenticated admin's session/token
@@ -165,8 +212,8 @@ app.put('/api/admin/users/:id/credits', async (req, res, next) => {
   }
 
   try {
-    // Update the credits in the credit_manage table using the user_id
-    await pool.execute('UPDATE credit_manage SET credits = ? WHERE user_id = ?', [credits, id]);
+    // Update the credits in the credit_manage table using the user's id
+    await pool.execute('UPDATE credit_manage SET credits = ? WHERE id = ?', [credits, id]);
 
     // Log the action
     await pool.execute(
@@ -184,7 +231,7 @@ app.put('/api/admin/users/:id/credits', async (req, res, next) => {
  * @route   GET /api/admin/logs
  * @desc    Get all audit logs
  */
-app.get('/api/admin/logs', async (req, res, next) => {
+app.get('/api/admin/logs', isAuthenticated, async (req, res, next) => {
   try {
     const [logs] = await pool.execute('SELECT * FROM audit_logs ORDER BY created_at DESC');
     res.json(logs);
@@ -192,6 +239,82 @@ app.get('/api/admin/logs', async (req, res, next) => {
     next(error); // Pass error to the centralized handler
   }
 });
+
+/**
+ * @route   POST /api/generate-video
+ * @desc    Simulates generating a video from a script
+ */
+app.post('/api/generate-video', (req, res, next) => {
+  const { script } = req.body;
+
+  if (!script) {
+    return res.status(400).json({ success: false, message: 'Script is required.' });
+  }
+
+  const jobId = `job_${Date.now()}`;
+  jobs[jobId] = { status: 'pending', script };
+
+  // Immediately respond to the user with the job ID
+  res.json({ success: true, jobId });
+
+  // Start the long-running video generation process in the background
+  processVideoGeneration(jobId);
+});
+
+/**
+ * @route   GET /api/video-status/:jobId
+ * @desc    Checks the status of a video generation job
+ */
+app.get('/api/video-status/:jobId', (req, res) => {
+  const { jobId } = req.params;
+  const job = jobs[jobId];
+
+  if (!job) {
+    return res.status(404).json({ success: false, message: 'Job not found.' });
+  }
+
+  res.json({ success: true, status: job.status, videoUrl: job.videoUrl });
+});
+
+
+// --- Background Video Generation Logic ---
+
+async function processVideoGeneration(jobId) {
+  const job = jobs[jobId];
+  try {
+    console.log(`[${jobId}] Starting video generation...`);
+    jobs[jobId].status = 'processing';
+
+    const prompt = `
+      You are a video production assistant. Analyze the following script and break it down into scenes. 
+      For each scene, provide a concise set of 3-4 keywords for searching stock video footage.
+      Output ONLY a valid JSON object in the format: { "scenes": [{ "text": "...", "keywords": "..." }] }.
+      
+      Script: "${job.script}"
+    `;
+
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
+    const sceneData = JSON.parse(responseText.replace(/```json|```/g, '').trim());
+
+    console.log(`[${jobId}] Scene data generated:`, sceneData);
+
+    // --- SIMULATION of further steps ---
+    // In a real app, you would:
+    // 1. For each scene, use keywords to search a video API (like Pexels, Shutterstock).
+    // 2. Generate Text-to-Speech audio for the script.
+    // 3. Use a tool like FFMPEG to stitch the video clips and audio together.
+    // 4. Upload the final video to a storage service (like S3) and get a URL.
+    await new Promise(resolve => setTimeout(resolve, 5000)); // Simulate work
+
+    jobs[jobId].status = 'complete';
+    jobs[jobId].videoUrl = '/login-animation.mp4'; // The final video URL
+    console.log(`[${jobId}] Job complete.`);
+  } catch (error) {
+    console.error(`[${jobId}] Error during video generation:`, error);
+    jobs[jobId].status = 'failed';
+  }
+}
 
 // --- Centralized Error Handler ---
 // This should be the last middleware added.

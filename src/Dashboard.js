@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 function Dashboard() {
   const [script, setScript] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [jobId, setJobId] = useState(null);
   const [videoUrl, setVideoUrl] = useState('');
 
   // Mock data for video history. In a real app, this would be fetched from your backend.
@@ -14,21 +15,67 @@ function Dashboard() {
     { id: 5, title: 'How to Bake the Perfect Sourdough', url: '/login-animation.mp4' },
   ]);
 
-  const handleGenerateVideo = () => {
+  const pollingInterval = useRef(null);
+
+  useEffect(() => {
+    if (jobId) {
+      pollingInterval.current = setInterval(checkJobStatus, 3000);
+    }
+    return () => {
+      if (pollingInterval.current) {
+        clearInterval(pollingInterval.current);
+      }
+    };
+  }, [jobId]);
+
+  const checkJobStatus = async () => {
+    try {
+      const response = await fetch(`/api/video-status/${jobId}`);
+      const data = await response.json();
+
+      if (data.status === 'complete') {
+        clearInterval(pollingInterval.current);
+        setVideoUrl(data.videoUrl);
+        setIsLoading(false);
+        setJobId(null);
+        const newVideo = { id: Date.now(), title: script.substring(0, 30) + '...', url: data.videoUrl };
+        setVideoHistory([newVideo, ...videoHistory].slice(0, 5));
+      } else if (data.status === 'failed') {
+        clearInterval(pollingInterval.current);
+        setIsLoading(false);
+        setJobId(null);
+        // You could set an error state here
+        console.error('Video generation failed.');
+      }
+    } catch (error) {
+      console.error('Error polling job status:', error);
+      clearInterval(pollingInterval.current);
+      setIsLoading(false);
+    }
+  };
+
+  const handleGenerateVideo = async () => {
     if (!script.trim()) return;
     setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      const newVideo = {
-        id: videoHistory.length + 1,
-        title: script.substring(0, 30) + '...', // Create a title from the script
-        url: '/login-animation.mp4' // The new video URL from the backend
-      };
-      setVideoUrl(newVideo.url);
-      // Add new video to the top of the history, and keep only the last 5
-      setVideoHistory([newVideo, ...videoHistory].slice(0, 5));
+    setVideoUrl(''); // Clear previous video
+    setJobId(null);
+
+    try {
+      const response = await fetch('/api/generate-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ script }),
+      });
+      const data = await response.json();
+      if (data.jobId) {
+        setJobId(data.jobId);
+      } else {
+        throw new Error('Failed to start video generation job.');
+      }
+    } catch (error) {
+      console.error('Error generating video:', error);
       setIsLoading(false);
-    }, 3000);
+    }
   };
 
   return (
@@ -52,14 +99,14 @@ function Dashboard() {
       </div>
 
       <div className="video-history-section">
-        <h2>Your Recent Videos</h2>
+        <h2>Recent Videos</h2>
         <div className="history-list">
           {videoHistory.map((video) => (
             <div key={video.id} className="history-item" onClick={() => setVideoUrl(video.url)}>
               <div className="history-item-thumbnail">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
               </div>
-              <p>{video.title}</p>
+              <span className="history-item-title">{video.title}</span>
             </div>
           ))}
         </div>
