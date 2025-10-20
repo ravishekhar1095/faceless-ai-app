@@ -16,6 +16,7 @@ import AdminLayout from './admin/AdminLayout.js';
 import UserManagement from './admin/UserManagement.js';
 import CreditManagement from './admin/CreditManagement.js';
 import AuditLog from './admin/AuditLog.js';
+import SocialConnectPage from './SocialConnectPage.js';
 
 function App() {
   return (
@@ -23,6 +24,9 @@ function App() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
+
+        {/* Page for social media connection popup */}
+        <Route path="/connect/:platform" element={<SocialConnectPage />} />
 
         {/* --- Protected Routes --- */}
         {/* Any route inside here will first check for a valid session */}

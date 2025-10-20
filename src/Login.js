@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, NavLink } from 'react-router-dom';
 import './Login.css';
 import Input from './Input.js';
 
@@ -72,45 +72,27 @@ function Login() {
   };
 
   return (
-    <div className="login-container">
-      {/* Left Panel for Creative Content */}
-      <div className="left-panel">
-        <div className="creative-content">
-          <h1>Faceless AI Studio</h1>
-          <p>Create stunning videos from text, without ever showing your face. Your privacy, our priority.</p>
-          {/* We are now using a video from the public folder */}
-          <video
-            className="creative-video"
-            src="/login-animation.mp4"
-            alt="AI video creation animation"
-            autoPlay
-            loop
-            muted
-            playsInline
-          />
-        </div>
-      </div>
-
-      {/* Right Panel for the Login Form */}
-      <div className="right-panel">
-        <div className="login-card">
-          <div className="login-logo">
-            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-            </svg>
-          </div>
+    <div className="login-page">
+      <div className="login-container">
+        <div className="login-form-container">
           <div className="login-header">
-            <h2>{isRegisterMode ? 'Create Account' : 'Welcome Back'}</h2>
-            <p>{isRegisterMode ? 'Get started with your new account' : 'Log in to continue'}</p>
+            <NavLink to="/" className="login-logo">
+              <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+              </svg>
+              <span>Faceless AI</span>
+            </NavLink>
+            <h2>{isRegisterMode ? 'Create an Account' : 'Welcome Back'}</h2>
+            <p>{isRegisterMode ? 'Get started with your new account.' : 'Sign in to continue to your account.'}</p>
           </div>
-          <form onSubmit={handleSubmit} className="login-form">
+          <form onSubmit={handleSubmit} className="login-form" noValidate>
             <Input
               id="username"
-              label="Username"
+              label="Email"
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="e.g., test"
+              placeholder="you@example.com"
               required
               autoComplete="username"
             />
@@ -120,7 +102,7 @@ function Login() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="e.g., 12345"
+              placeholder="••••••••"
               required
               autoComplete={isRegisterMode ? "new-password" : "current-password"}
             />
@@ -139,15 +121,20 @@ function Login() {
             {error && <p className="error-message">{error}</p>}
             {success && <p className="success-message">{success}</p>}
             <button type="submit" className="login-button" disabled={loading}>
-              {loading ? 'Processing...' : (isRegisterMode ? 'Sign Up' : 'Log In')}
+              {loading ? 'Processing...' : (isRegisterMode ? 'Create Account' : 'Sign In')}
             </button>
+            <div className="form-divider">
+              <span className="divider-line"></span>
+              <span className="divider-text">OR</span>
+            </div>
           </form>
-          <div className="toggle-mode">
-            <p>
-              {isRegisterMode ? 'Already have an account?' : "Don't have an account?"}
-              <button onClick={toggleMode}>{isRegisterMode ? 'Log In' : 'Sign Up'}</button>
-            </p>
-          </div>
+          <p className="toggle-link">
+            {isRegisterMode ? 'Already have an account?' : "Don't have an account?"}{' '}
+            <button onClick={toggleMode}>{isRegisterMode ? 'Sign In' : 'Sign Up'}</button>
+          </p>
+        </div>
+        <div className="login-visual">
+          <video className="login-video" src="/GIF_Generation_Request_Fulfilled.mp4#t=2" alt="AI video creation animation" autoPlay loop muted playsInline />
         </div>
       </div>
     </div>

@@ -1,24 +1,3 @@
-const defaults = { color: 'blue', size: 'medium' };
-const options = { size: 'large', enabled: true };
-
-// To create a new object without modifying the original ones:
-const finalOptions = Object.assign({}, defaults, options);
-
-// finalOptions is now: { color: 'blue', size: 'large', enabled: true }
-// 'defaults' and 'options' remain unchanged.
-import util from 'util';
-
-const defaults = { color: 'blue', size: 'medium' };
-const options = { size: 'large', enabled: true };
-
-// This mutates the 'defaults' object
-const finalOptions = util._extend(defaults, options);
-// Incorrect: This bypasses the proxy
-fetch('http://localhost:3001/api/some-endpoint')
-  .then(res => res.json());
-// Correct: This uses the proxy defined in your package.json
-fetch('/api/some-endpoint')
-  .then(res => res.json());
 {
   "name": "faceless-ai-app",
   "version": "1.0.0",

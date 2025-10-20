@@ -37,7 +37,7 @@ app.post('/api/login', async (req, res) => {
     // ... rest of the login logic
   });
 });
-DESCRIBE users;
+users;
 /// <reference types="vite/client" />
 
 declare module '*.vue' {
