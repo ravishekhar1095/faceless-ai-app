@@ -14,6 +14,7 @@ const port = 3001;
 // --- Middleware ---
 app.use(cors()); // Enable Cross-Origin Resource Sharing
 app.use(express.json()); // Middleware to parse JSON bodies
+app.use(express.static('public')); // Serve static files from the 'public' directory
 
 // Session Configuration
 const FORTY_FIVE_MINUTES = 1000 * 60 * 45;
@@ -38,7 +39,10 @@ const dbConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_DATABASE,
-  connectTimeout: 30000 // Increase timeout to 30 seconds
+  connectTimeout: 30000, // Increase timeout to 30 seconds
+  waitForConnections: true, // Wait for a connection to become available
+  connectionLimit: 10, // Max number of connections in the pool
+  queueLimit: 0 // Unlimited queueing
 };
 
 const pool = mysql.createPool(dbConfig);
@@ -81,7 +85,8 @@ app.post('/api/login', async (req, res, next) => {
       // Create a session for the user
       req.session.user = {
         id: user.id,
-        username: user.username
+        username: user.username,
+        credits: user.credits
       };
       res.json({ success: true, message: 'Login successful!', user: req.session.user });
     } else {
@@ -124,25 +129,48 @@ app.get('/api/check-session', (req, res) => {
  * @desc    Register a new user
  */
 app.post('/api/register', async (req, res, next) => {
-  const { username, password } = req.body;
+  const { username: email, password } = req.body; // The 'username' from the form is the email
 
-  if (!username || !password) {
-    return res.status(400).json({ success: false, message: 'Username and password are required.' });
+  if (!email || !password) {
+    return res.status(400).json({ success: false, message: 'Email and password are required.' });
   }
 
   try {
+    // 1. Generate a unique 4-digit user_id
+    let userId;
+    let isUnique = false;
+    while (!isUnique) {
+      userId = Math.floor(1000 + Math.random() * 9000);
+      const [existingUser] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userId]);
+      if (existingUser.length === 0) {
+        isUnique = true;
+      }
+    }
+
+    // Extract a username from the email
+    const username = email.split('@')[0];
+
     // Check if username already exists
     const [existingUsers] = await pool.execute('SELECT id FROM users WHERE username = ?', [username]);
     if (existingUsers.length > 0) {
-      return res.status(409).json({ success: false, message: 'Username already taken.' });
+      return res.status(409).json({ success: false, message: 'A user with that username already exists.' });
+    }
+
+    // Check if email already exists
+    const [existingEmails] = await pool.execute('SELECT id FROM users WHERE email = ?', [email]);
+    if (existingEmails.length > 0) {
+      return res.status(409).json({ success: false, message: 'An account with this email already exists.' });
     }
 
     // Hash the password
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // Insert the new user into the correct 'users' table
-    await pool.execute('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashedPassword]);
+    // 2. Insert the new user with the unique user_id and default credits
+    await pool.execute(
+      'INSERT INTO users (user_id, username, email, password, credits) VALUES (?, ?, ?, ?, ?)',
+      [userId, username, email, hashedPassword, 10] // Assign 10 credits
+    );
     res.status(201).json({ success: true, message: 'Registration successful! Please log in.' });
   } catch (error) {
     next(error); // Pass error to the centralized handler
@@ -156,8 +184,8 @@ app.post('/api/register', async (req, res, next) => {
 app.get('/api/admin/users', isAuthenticated, async (req, res, next) => {
   // In a real app, this route should be protected to ensure only admins can access it.
   try {
-    // Select all users and their credits from the single table
-    const [users] = await pool.execute('SELECT id, username, email, credits, created_at FROM credit_manage');
+    // Corrected to select from the 'users' table
+    const [users] = await pool.execute('SELECT id, username, email, created_at FROM users');
     res.json(users);
   } catch (error) {
     next(error); // Pass error to the centralized handler
@@ -174,14 +202,14 @@ app.delete('/api/admin/users/:id', isAuthenticated, async (req, res, next) => {
 
   // In a real app, you might want to prevent an admin from deleting their own account.
   try {
-    // First, get user details for logging before deleting
-    const [users] = await pool.execute('SELECT username FROM credit_manage WHERE id = ?', [id]);
+    // Corrected to select from the 'users' table
+    const [users] = await pool.execute('SELECT username FROM users WHERE id = ?', [id]);
     if (users.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
     const targetUsername = users[0].username;
 
-    const [result] = await pool.execute('DELETE FROM credit_manage WHERE id = ?', [id]);
+    const [result] = await pool.execute('DELETE FROM users WHERE id = ?', [id]);
     if (result.affectedRows === 0) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
@@ -315,6 +343,52 @@ async function processVideoGeneration(jobId) {
     jobs[jobId].status = 'failed';
   }
 }
+
+// --- Theme Settings API Routes ---
+
+/**
+ * @route   GET /api/theme-settings
+ * @desc    Get all theme settings for the frontend
+ * @access  Public
+ */
+app.get('/api/theme-settings', async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute('SELECT setting_key, setting_value FROM theme_settings');
+    const settings = rows.reduce((acc, row) => {
+      acc[row.setting_key] = row.setting_value;
+      return acc;
+    }, {});
+    res.json(settings);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * @route   PUT /api/admin/theme-settings
+ * @desc    Update theme settings from the admin panel
+ * @access  Private (Admin)
+ */
+app.put('/api/admin/theme-settings', isAuthenticated, async (req, res, next) => {
+  const settings = req.body; // Expects an object like { key: value, ... }
+  try {
+    const connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    for (const key in settings) {
+      await connection.execute(
+        'INSERT INTO theme_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)',
+        [key, settings[key]]
+      );
+    }
+
+    await connection.commit();
+    connection.release();
+    res.json({ success: true, message: 'Theme settings updated successfully.' });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // --- Centralized Error Handler ---
 // This should be the last middleware added.

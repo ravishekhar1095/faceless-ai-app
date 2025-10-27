@@ -5,8 +5,8 @@ import AnimatedSection from './AnimatedSection.js';
 import './AnimatedSection.css';
 import FeatureCard from './FeatureCard.js';
 import Step from './Step.js';
-import StatCounter from './StatCounter.js';
 import FAQItem from './FAQItem.js';
+import { useTheme } from './ThemeContext.js';
 
 const navLinks = [
   { href: '#features', text: 'Features' },
@@ -79,6 +79,7 @@ const initialFaqs = [
 
 function LandingPage() {
   const [faqs, setFaqs] = useState(initialFaqs);
+  // const { settings } = useTheme(); // Removed for fixed dark theme
 
   const toggleFAQ = index => {
     setFaqs(faqs.map((faq, i) => (i === index ? { ...faq, open: !faq.open } : { ...faq, open: false })));
@@ -110,13 +111,13 @@ function LandingPage() {
         <section className="hero-section page-section">
           <div className="container hero-container">
             <div className="hero-content">
-              <h1>Create Compelling Videos, Anonymously.</h1>
-              <p>Turn your scripts into high-quality videos with AI-powered voiceovers and visuals. No camera, no crew, no problem.</p>
+              <h1>Create Stunning Videos, Effortlessly.</h1>
+              <p>Transform your ideas into captivating AI-generated videos with professional voiceovers and dynamic visuals. No camera, no crew, no hassle.</p>
               <NavLink to="/login" className="cta-button-hero">Get Started for Free</NavLink>
             </div>
             <div className="hero-visual">
-              <img
-                className="hero-video"
+              <video
+                className="hero-video-background"
                 src="/Gemini_Generated_Image_gvry45gvry45gvry.png"
                 alt="Abstract AI-generated visual representing creativity"
               />
@@ -163,30 +164,30 @@ function LandingPage() {
           </AnimatedSection>
         </section>
 
-        <section className="stats-section page-section">
+        {/* <section className="stats-section page-section">
           <AnimatedSection className="stats-section-animator">
             <div className="container">
               <div className="stats-grid">
                 <div className="stat-item">
-                  <StatCounter end={10000} suffix="+" isVisible={true} />
+                  <StatCounter end={10000} suffix="+" />
                   <p>Creators Empowered</p>
                 </div>
                 <div className="stat-item">
-                  <StatCounter end={1000000} suffix="+" isVisible={true} />
+                  <StatCounter end={1000000} suffix="+" />
                   <p>Videos Generated</p>
                 </div>
                 <div className="stat-item">
-                  <StatCounter end={98} suffix="%" isVisible={true} />
+                  <StatCounter end={98} suffix="%" />
                   <p>User Satisfaction</p>
                 </div>
                 <div className="stat-item">
-                  <StatCounter end={5} suffix="x" isVisible={true} />
+                  <StatCounter end={5} suffix="x" />
                   <p>Faster Content Creation</p>
                 </div>
               </div>
             </div>
-          </AnimatedSection>
-        </section>
+          </AnimatedSection> */}
+        {/* </section> */} {/* Removed for now to simplify and match airtop.ai's initial sections */}
 
         <section id="how-it-works" className="how-it-works-section page-section">
           <AnimatedSection>

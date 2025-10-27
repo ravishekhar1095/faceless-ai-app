@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import './Dashboard.css';
 
@@ -8,30 +8,30 @@ function Dashboard() {
   const [jobId, setJobId] = useState(null);
   const [videoUrl, setVideoUrl] = useState('');
   const [voiceStyle, setVoiceStyle] = useState('professional');
-  const [aspectRatio, setAspectRatio] = useState('16:9');
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [isDownloadOpen, setIsDownloadOpen] = useState(false);
-  const [showDisconnectModal, setShowDisconnectModal] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState('16:9'); // Define aspectRatio state
+  const [isDownloadOpen, setIsDownloadOpen] = useState(false); // Define isDownloadOpen state
+  const [showDisconnectModal, setShowDisconnectModal] = useState(false); // Define showDisconnectModal state
   const [platformToDisconnect, setPlatformToDisconnect] = useState(null);
   const navigate = useNavigate();
 
-  // Mock user data. In a real app, this would come from context or a user hook.
-  const [user, setUser] = useState({
-    name: 'Ravi Shekhar',
-    credits: 15,
-    plan: 'pro', // 'free', 'pro', 'premium'
-  });
+  // Mock user data (should come from context/session in Welcome.js)
+  const user = { name: 'Ravi Shekhar', credits: 15, plan: 'pro' }; // Placeholder
 
-  // Mock state for connected accounts. In a real app, this would be fetched.
-  const [connectedAccounts, setConnectedAccounts] = useState({});
-
-  // Mock data for video history. In a real app, this would be fetched from your backend.
+  const [connectedAccounts, setConnectedAccounts] = useState({}); // Define connectedAccounts state
   const [videoHistory, setVideoHistory] = useState([
     { id: 1, title: 'The Rise of AI in 2024', url: '/GIF_Generation_Request_Fulfilled.mp4' },
     { id: 2, title: 'Marketing Tips for Startups', url: '/GIF_Generation_Request_Fulfilled_1.mp4' },
     { id: 3, title: 'A Journey Through the Alps', url: '/GIF_Generation_Request_Fulfilled.mp4' },
     { id: 4, title: 'The Future of Renewable Energy', url: '/GIF_Generation_Request_Fulfilled_1.mp4' },
     { id: 5, title: 'How to Bake the Perfect Sourdough', url: '/GIF_Generation_Request_Fulfilled.mp4' },
+  ]);
+
+  // State for AI Avatar Insights (mock data)
+  const [avatarInsights, setAvatarInsights] = useState([
+
+    { name: 'AI Persona Alpha', usage: '25%', icon: <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg> },
+    { name: 'AI Persona Beta', usage: '18%', icon: <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg> },
+    { name: 'AI Persona Gamma', usage: '12%', icon: <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg> },
   ]);
 
   const socialPlatforms = [
@@ -54,7 +54,7 @@ function Dashboard() {
     premium: 3,
   };
 
-  const pollingInterval = useRef(null);
+  const pollingIntervalRef = useRef(null);
 
   // Fetch connected accounts on component mount
   useEffect(() => {
@@ -79,12 +79,13 @@ function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (jobId) {
-      pollingInterval.current = setInterval(checkJobStatus, 3000);
+    if (jobId && !pollingIntervalRef.current) {
+      pollingIntervalRef.current = setInterval(checkJobStatus, 3000);
     }
     return () => {
-      if (pollingInterval.current) {
-        clearInterval(pollingInterval.current);
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
       }
     };
   }, [jobId]);
@@ -95,21 +96,24 @@ function Dashboard() {
       const data = await response.json();
 
       if (data.status === 'complete') {
-        clearInterval(pollingInterval.current);
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
         setVideoUrl(data.videoUrl);
         setIsLoading(false);
         setJobId(null);
         const newVideo = { id: Date.now(), title: script.substring(0, 30) + '...', url: data.videoUrl };
         setVideoHistory([newVideo, ...videoHistory].slice(0, 5));
       } else if (data.status === 'failed') {
-        clearInterval(pollingInterval.current);
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
         setIsLoading(false);
         setJobId(null);
         console.error('Video generation failed.');
       }
     } catch (error) {
       console.error('Error polling job status:', error);
-      clearInterval(pollingInterval.current);
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
       setIsLoading(false);
     }
   };
@@ -138,12 +142,6 @@ function Dashboard() {
     }
   };
 
-  const handleLogout = () => {
-    // In a real app, this would call an API to invalidate the session/token
-    console.log('Logging out...');
-    navigate('/login');
-  };
-
   const handleConnectClick = (platformName) => {
     const width = 600;
     const height = 700;
@@ -170,36 +168,7 @@ function Dashboard() {
   };
 
   return (
-    <div className="dashboard-wrapper">
-      <header className="dashboard-header">
-        <div className="dashboard-logo">
-          <NavLink to="/welcome/dashboard">
-            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-            </svg>
-            <span>Faceless AI</span>
-          </NavLink>
-        </div>
-        <div className="header-right">
-          <div className="credits-display">
-            <span>Credits:</span>
-            <strong>{user.credits}</strong>
-          </div>
-          <div className="user-profile">
-            <button className="user-profile-button" onClick={() => setIsProfileOpen(!isProfileOpen)}>
-              <span>{user.name}</span>
-              <div className="user-avatar">{user.name.charAt(0)}</div>
-            </button>
-            {isProfileOpen && (
-              <div className="profile-dropdown">
-                <NavLink to="/welcome/settings" className="dropdown-item">Settings</NavLink>
-                <button onClick={handleLogout} className="dropdown-item">Logout</button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-      <div className="dashboard-layout">
+    <div className="dashboard-container"> {/* This is the main container for the dashboard content */}
         <div className="dashboard-main">
           <div className="content-header">
             <h1>Welcome to Your Studio</h1>
@@ -319,38 +288,6 @@ function Dashboard() {
             </div>
           </div>
         </div>
-
-        <aside className="dashboard-sidebar">
-          <div className="video-history-section">
-            <h2>Recent Videos</h2>
-            <div className="history-list">
-              {videoHistory.map((video) => (
-                <div key={video.id} className="history-item" onClick={() => setVideoUrl(video.url)}>
-                  <div className="history-item-thumbnail">
-                    <video src={video.url} muted playsInline />
-                    <div className="play-icon-overlay">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-                    </div>
-                  </div>
-                  <span className="history-item-title">{video.title}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </aside>
-      </div>
-      {showDisconnectModal && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <h3>Disconnect {platformToDisconnect}?</h3>
-            <p>Are you sure you want to disconnect your {platformToDisconnect} account? You will need to reconnect it to publish videos.</p>
-            <div className="modal-actions">
-              <button onClick={() => setShowDisconnectModal(false)} className="modal-button secondary">Cancel</button>
-              <button onClick={confirmDisconnect} className="modal-button danger">Disconnect</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
