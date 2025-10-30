@@ -14,6 +14,7 @@ const port = 3001;
 // --- Middleware ---
 app.use(cors()); // Enable Cross-Origin Resource Sharing
 app.use(express.json()); // Middleware to parse JSON bodies
+app.use(express.static('public')); // Serve static files from the 'public' directory
 
 // Session Configuration
 const FORTY_FIVE_MINUTES = 1000 * 60 * 45;
@@ -30,6 +31,12 @@ app.use(session({
 
 // A simple middleware to protect routes
 const isAuthenticated = (req, res, next) => req.session.user ? next() : res.status(401).json({ success: false, message: 'Unauthorized' });
+const isAdmin = (req, res, next) => {
+  if (req.session.user && req.session.user.user_type === 'admin') {
+    return next();
+  }
+  return res.status(403).json({ success: false, message: 'Admin access required.' });
+};
 
 // --- MySQL Database Connection ---
 // Use environment variables for database configuration
@@ -38,16 +45,185 @@ const dbConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_DATABASE,
-  connectTimeout: 30000 // Increase timeout to 30 seconds
+  connectTimeout: 30000, // Increase timeout to 30 seconds
+  waitForConnections: true, // Wait for a connection to become available
+  connectionLimit: 10, // Max number of connections in the pool
+  queueLimit: 0 // Unlimited queueing
 };
 
 const pool = mysql.createPool(dbConfig);
 
 // --- AI and Job Management Setup ---
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+let model = null;
+const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY);
+
+if (hasGeminiKey) {
+  try {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  } catch (error) {
+    console.warn('Failed to initialize Gemini model. Falling back to local scene generation.', error.message);
+  }
+} else {
+  console.warn('GEMINI_API_KEY not provided. Falling back to local scene generation.');
+}
 
 const jobs = {}; // In-memory job store. In production, use a database or Redis.
+
+const DEFAULT_THEME_SETTINGS = Object.freeze({
+  hero_title: 'Create Stunning Videos, Effortlessly.',
+  hero_subtitle: 'Transform your ideas into captivating AI-generated videos in minutes.',
+  primary_color: '#6366f1'
+});
+
+function buildFallbackScenes(script = '') {
+  const sanitized = script.replace(/\s+/g, ' ').trim();
+
+  if (!sanitized) {
+    return [{
+      text: 'Introduce Faceless AI and invite viewers to generate their first faceless video.',
+      keywords: 'faceless ai intro video'
+    }];
+  }
+
+  const segments = sanitized
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map(segment => segment.trim())
+    .filter(Boolean);
+
+  const limited = segments.slice(0, 6);
+
+  return limited.map((segment, index) => ({
+    text: segment,
+    keywords: segment
+      .toLowerCase()
+      .split(/\W+/)
+      .filter(Boolean)
+      .slice(0, 5)
+      .join(' ') || `scene ${index + 1}`
+  }));
+}
+
+async function generateScenesFromScript(script) {
+  if (!model) {
+    return { scenes: buildFallbackScenes(script) };
+  }
+
+  try {
+    const prompt = `
+      You are a video production assistant. Analyze the following script and break it down into scenes.
+      For each scene, provide a concise set of 3-4 keywords for searching stock video footage.
+      Output ONLY a valid JSON object in the format: { "scenes": [{ "text": "...", "keywords": "..." }] }.
+
+      Script: "${script}"
+    `;
+
+    const result = await model.generateContent(prompt);
+    const responseText = result.response.text();
+    const sceneData = JSON.parse(responseText.replace(/```json|```/g, '').trim());
+
+    if (sceneData && Array.isArray(sceneData.scenes) && sceneData.scenes.length > 0) {
+      return sceneData;
+    }
+  } catch (error) {
+    console.warn('Gemini scene generation failed. Falling back to local scene builder.', error.message);
+  }
+
+  return { scenes: buildFallbackScenes(script) };
+}
+
+function deriveJobTitle(originalScript, fallback) {
+  const source = (originalScript || fallback || '').replace(/\s+/g, ' ').trim();
+  if (!source) {
+    return 'Untitled render';
+  }
+  const firstSentence = source.split(/(?<=[.!?])\s+/)[0] || source.slice(0, 80);
+  return firstSentence.length > 80 ? `${firstSentence.slice(0, 77)}…` : firstSentence;
+}
+
+async function generateScriptFromIdea(idea) {
+  const trimmedIdea = idea.replace(/\s+/g, ' ').trim();
+  if (!trimmedIdea) {
+    return '';
+  }
+
+  if (!model) {
+    return buildFallbackScriptFromIdea(trimmedIdea);
+  }
+
+  try {
+    const prompt = `
+      You are a video script writer. Create a short, engaging script based on the idea below.
+      The script should include an introduction, two key sections, and a closing call-to-action.
+      Keep sentences concise and conversational. Return plain text with paragraph breaks.
+
+      Idea: "${trimmedIdea}"
+    `;
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().replace(/```(?:text)?|```/g, '').trim();
+    if (text) {
+      return text;
+    }
+  } catch (error) {
+    console.warn('Gemini script generation failed. Falling back to template.', error.message);
+  }
+
+  return buildFallbackScriptFromIdea(trimmedIdea);
+}
+
+async function generateScriptFromArticle(articleContent) {
+  const cleaned = articleContent.replace(/\s+/g, ' ').trim();
+  if (!cleaned) {
+    return '';
+  }
+
+  if (!model) {
+    return buildFallbackScriptFromArticle(cleaned);
+  }
+
+  try {
+    const prompt = `
+      You are an expert editor. Convert the article excerpt below into a concise narration script for a 60-90 second video.
+      Structure it with: hook, key insights (2-3), and final takeaway / call-to-action.
+      Return plain text paragraphs without markdown.
+
+      Article excerpt: "${cleaned}"
+    `;
+    const result = await model.generateContent(prompt);
+    const text = result.response.text().replace(/```(?:text)?|```/g, '').trim();
+    if (text) {
+      return text;
+    }
+  } catch (error) {
+    console.warn('Gemini article-to-script failed. Falling back to summarizer.', error.message);
+  }
+
+  return buildFallbackScriptFromArticle(cleaned);
+}
+
+function buildFallbackScriptFromIdea(idea) {
+  return [
+    `Hook: Imagine ${idea.toLowerCase()} becoming the next big conversation on social feeds.`,
+    `Problem: Creators struggle to keep up because ${idea.toLowerCase()} evolves faster than traditional production.`,
+    `Solution: With Faceless AI, you can spin up explainer clips about ${idea.toLowerCase()} in minutes, pairing voice, visuals, and captions instantly.`,
+    `Call-to-action: Try Faceless AI today and turn ideas like "${idea}" into binge-worthy videos without ever stepping on camera.`
+  ].join('\n\n');
+}
+
+function buildFallbackScriptFromArticle(articleContent) {
+  const sentences = articleContent.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const intro = sentences[0] || articleContent.slice(0, 120);
+  const insightOne = sentences[1] || 'The landscape is shifting faster than analysts expected.';
+  const insightTwo = sentences[2] || 'Teams that adapt now will have the strongest advantage.';
+  const closing = sentences[3] || 'Stay ahead by translating research into human stories.';
+
+  return [
+    `Hook: ${intro}`,
+    `Insight 1: ${insightOne}`,
+    `Insight 2: ${insightTwo}`,
+    `Takeaway: ${closing}`
+  ].join('\n\n');
+}
 
 // --- API Routes ---
 
@@ -64,8 +240,8 @@ app.post('/api/login', async (req, res, next) => {
 
   try {
     const [rows] = await pool.execute(
-      'SELECT * FROM users WHERE username = ?',
-      [username]
+      'SELECT * FROM users WHERE username = ? OR email = ? LIMIT 1',
+      [username, username]
     );
 
     if (rows.length === 0) {
@@ -81,7 +257,9 @@ app.post('/api/login', async (req, res, next) => {
       // Create a session for the user
       req.session.user = {
         id: user.id,
-        username: user.username
+        username: user.username,
+        credits: user.credits,
+        user_type: user.user_type
       };
       res.json({ success: true, message: 'Login successful!', user: req.session.user });
     } else {
@@ -89,6 +267,43 @@ app.post('/api/login', async (req, res, next) => {
     }
   } catch (error) {
     next(error); // Pass error to the centralized handler
+  }
+});
+
+app.post('/api/admin/login', async (req, res, next) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ success: false, message: 'Username and password are required.' });
+  }
+
+  try {
+    const [rows] = await pool.execute(
+      "SELECT * FROM users WHERE (username = ? OR email = ?) AND user_type = 'admin' LIMIT 1",
+      [username, username]
+    );
+
+    if (rows.length === 0) {
+      return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
+    }
+
+    const adminUser = rows[0];
+    const isMatch = await bcrypt.compare(password, adminUser.password);
+
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
+    }
+
+    req.session.user = {
+      id: adminUser.id,
+      username: adminUser.username,
+      credits: adminUser.credits,
+      user_type: adminUser.user_type
+    };
+
+    res.json({ success: true, message: 'Admin login successful.', user: req.session.user });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -124,25 +339,48 @@ app.get('/api/check-session', (req, res) => {
  * @desc    Register a new user
  */
 app.post('/api/register', async (req, res, next) => {
-  const { username, password } = req.body;
+  const { username: email, password } = req.body; // The 'username' from the form is the email
 
-  if (!username || !password) {
-    return res.status(400).json({ success: false, message: 'Username and password are required.' });
+  if (!email || !password) {
+    return res.status(400).json({ success: false, message: 'Email and password are required.' });
   }
 
   try {
+    // 1. Generate a unique 4-digit user_id
+    let userId;
+    let isUnique = false;
+    while (!isUnique) {
+      userId = Math.floor(1000 + Math.random() * 9000);
+      const [existingUser] = await pool.execute('SELECT id FROM users WHERE user_id = ?', [userId]);
+      if (existingUser.length === 0) {
+        isUnique = true;
+      }
+    }
+
+    // Extract a username from the email
+    const username = email.split('@')[0];
+
     // Check if username already exists
     const [existingUsers] = await pool.execute('SELECT id FROM users WHERE username = ?', [username]);
     if (existingUsers.length > 0) {
-      return res.status(409).json({ success: false, message: 'Username already taken.' });
+      return res.status(409).json({ success: false, message: 'A user with that username already exists.' });
+    }
+
+    // Check if email already exists
+    const [existingEmails] = await pool.execute('SELECT id FROM users WHERE email = ?', [email]);
+    if (existingEmails.length > 0) {
+      return res.status(409).json({ success: false, message: 'An account with this email already exists.' });
     }
 
     // Hash the password
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // Insert the new user into the correct 'users' table
-    await pool.execute('INSERT INTO users (username, password) VALUES (?, ?)', [username, hashedPassword]);
+    // 2. Insert the new user with the unique user_id and default credits
+    await pool.execute(
+      'INSERT INTO users (user_id, username, email, password, credits, user_type) VALUES (?, ?, ?, ?, ?, ?)',
+      [userId, username, email, hashedPassword, 10, 'standard']
+    );
     res.status(201).json({ success: true, message: 'Registration successful! Please log in.' });
   } catch (error) {
     next(error); // Pass error to the centralized handler
@@ -153,11 +391,11 @@ app.post('/api/register', async (req, res, next) => {
  * @route   GET /api/admin/users
  * @desc    Get all users (for admin panel)
  */
-app.get('/api/admin/users', isAuthenticated, async (req, res, next) => {
+app.get('/api/admin/users', isAdmin, async (req, res, next) => {
   // In a real app, this route should be protected to ensure only admins can access it.
   try {
-    // Select all users and their credits from the single table
-    const [users] = await pool.execute('SELECT id, username, email, credits, created_at FROM credit_manage');
+    // Corrected to select from the 'users' table
+    const [users] = await pool.execute('SELECT id, username, email, created_at, user_type FROM users');
     res.json(users);
   } catch (error) {
     next(error); // Pass error to the centralized handler
@@ -168,20 +406,20 @@ app.get('/api/admin/users', isAuthenticated, async (req, res, next) => {
  * @route   DELETE /api/admin/users/:id
  * @desc    Delete a user by ID
  */
-app.delete('/api/admin/users/:id', isAuthenticated, async (req, res, next) => {
+app.delete('/api/admin/users/:id', isAdmin, async (req, res, next) => {
   const { id } = req.params;
   const adminUsername = 'admin'; // In a real app, get this from the authenticated admin's session/token
 
   // In a real app, you might want to prevent an admin from deleting their own account.
   try {
-    // First, get user details for logging before deleting
-    const [users] = await pool.execute('SELECT username FROM credit_manage WHERE id = ?', [id]);
+    // Corrected to select from the 'users' table
+    const [users] = await pool.execute('SELECT username FROM users WHERE id = ?', [id]);
     if (users.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
     const targetUsername = users[0].username;
 
-    const [result] = await pool.execute('DELETE FROM credit_manage WHERE id = ?', [id]);
+    const [result] = await pool.execute('DELETE FROM users WHERE id = ?', [id]);
     if (result.affectedRows === 0) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
@@ -202,7 +440,7 @@ app.delete('/api/admin/users/:id', isAuthenticated, async (req, res, next) => {
  * @route   PUT /api/admin/users/:id/credits
  * @desc    Update a user's credits
  */
-app.put('/api/admin/users/:id/credits', isAuthenticated, async (req, res, next) => {
+app.put('/api/admin/users/:id/credits', isAdmin, async (req, res, next) => {
   const { id } = req.params;
   const { credits } = req.body;
   const adminUsername = 'admin'; // In a real app, get this from the authenticated admin's session/token
@@ -231,7 +469,7 @@ app.put('/api/admin/users/:id/credits', isAuthenticated, async (req, res, next) 
  * @route   GET /api/admin/logs
  * @desc    Get all audit logs
  */
-app.get('/api/admin/logs', isAuthenticated, async (req, res, next) => {
+app.get('/api/admin/logs', isAdmin, async (req, res, next) => {
   try {
     const [logs] = await pool.execute('SELECT * FROM audit_logs ORDER BY created_at DESC');
     res.json(logs);
@@ -242,23 +480,73 @@ app.get('/api/admin/logs', isAuthenticated, async (req, res, next) => {
 
 /**
  * @route   POST /api/generate-video
- * @desc    Simulates generating a video from a script
+ * @desc    Simulates generating a video from a script, idea, or article content
  */
-app.post('/api/generate-video', (req, res, next) => {
-  const { script } = req.body;
+app.post('/api/generate-video', async (req, res, next) => {
+  try {
+    const {
+      mode = 'script',
+      script: rawScript = '',
+      idea = '',
+      article = '',
+      voiceStyle = 'professional',
+      aspectRatio = '16:9'
+    } = req.body;
 
-  if (!script) {
-    return res.status(400).json({ success: false, message: 'Script is required.' });
+    let workingScript = '';
+    const normalizedMode = ['script', 'idea', 'article'].includes(mode) ? mode : 'script';
+
+    if (normalizedMode === 'script') {
+      workingScript = String(rawScript || '').trim();
+      if (!workingScript) {
+        return res.status(400).json({ success: false, message: 'Please provide a script to generate a video.' });
+      }
+    } else if (normalizedMode === 'idea') {
+      const trimmedIdea = String(idea || rawScript || '').trim();
+      if (!trimmedIdea) {
+        return res.status(400).json({ success: false, message: 'Share a video idea so we can craft the script.' });
+      }
+      workingScript = await generateScriptFromIdea(trimmedIdea);
+      if (!workingScript) {
+        return res.status(500).json({ success: false, message: 'Unable to build a script from that idea. Try again.' });
+      }
+    } else if (normalizedMode === 'article') {
+      const articleContent = String(article || rawScript || '').trim();
+      if (!articleContent) {
+        return res.status(400).json({ success: false, message: 'Paste article notes to convert into a video script.' });
+      }
+      workingScript = await generateScriptFromArticle(articleContent);
+      if (!workingScript) {
+        return res.status(500).json({ success: false, message: 'Unable to summarize that article. Try again.' });
+      }
+    }
+
+    workingScript = workingScript.trim();
+
+    const jobId = `job_${Date.now()}`;
+    jobs[jobId] = {
+      id: jobId,
+      status: 'pending',
+      mode: normalizedMode,
+      voiceStyle,
+      aspectRatio,
+      script: workingScript,
+      scenes: [],
+      error: null,
+      videoUrl: null,
+      createdAt: Date.now(),
+      completedAt: null,
+      title: deriveJobTitle(workingScript)
+    };
+
+    // Immediately respond to the user with the job ID
+    res.json({ success: true, jobId });
+
+    // Start the long-running video generation process in the background
+    processVideoGeneration(jobId);
+  } catch (error) {
+    next(error);
   }
-
-  const jobId = `job_${Date.now()}`;
-  jobs[jobId] = { status: 'pending', script };
-
-  // Immediately respond to the user with the job ID
-  res.json({ success: true, jobId });
-
-  // Start the long-running video generation process in the background
-  processVideoGeneration(jobId);
 });
 
 /**
@@ -273,7 +561,42 @@ app.get('/api/video-status/:jobId', (req, res) => {
     return res.status(404).json({ success: false, message: 'Job not found.' });
   }
 
-  res.json({ success: true, status: job.status, videoUrl: job.videoUrl });
+  res.json({
+    success: true,
+    status: job.status,
+    videoUrl: job.videoUrl,
+    scenes: job.scenes || [],
+    error: job.error || null,
+    mode: job.mode,
+    title: job.title,
+    voiceStyle: job.voiceStyle,
+    aspectRatio: job.aspectRatio,
+    createdAt: job.createdAt,
+    completedAt: job.completedAt
+  });
+});
+
+/**
+ * @route   GET /api/jobs/recent
+ * @desc    Returns recent generation jobs for the authenticated user session
+ */
+app.get('/api/jobs/recent', isAuthenticated, (req, res) => {
+  const recentJobs = Object.values(jobs)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .slice(0, 12)
+    .map(job => ({
+      id: job.id,
+      title: job.title || deriveJobTitle(job.script),
+      mode: job.mode,
+      status: job.status,
+      videoUrl: job.videoUrl,
+      createdAt: job.createdAt,
+      completedAt: job.completedAt,
+      voiceStyle: job.voiceStyle,
+      aspectRatio: job.aspectRatio
+    }));
+
+  res.json(recentJobs);
 });
 
 
@@ -281,21 +604,17 @@ app.get('/api/video-status/:jobId', (req, res) => {
 
 async function processVideoGeneration(jobId) {
   const job = jobs[jobId];
+  if (!job) {
+    console.warn(`[${jobId}] Job no longer exists. Skipping generation.`);
+    return;
+  }
   try {
     console.log(`[${jobId}] Starting video generation...`);
     jobs[jobId].status = 'processing';
+    jobs[jobId].error = null;
 
-    const prompt = `
-      You are a video production assistant. Analyze the following script and break it down into scenes. 
-      For each scene, provide a concise set of 3-4 keywords for searching stock video footage.
-      Output ONLY a valid JSON object in the format: { "scenes": [{ "text": "...", "keywords": "..." }] }.
-      
-      Script: "${job.script}"
-    `;
-
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
-    const sceneData = JSON.parse(responseText.replace(/```json|```/g, '').trim());
+    const sceneData = await generateScenesFromScript(job.script);
+    jobs[jobId].scenes = sceneData.scenes;
 
     console.log(`[${jobId}] Scene data generated:`, sceneData);
 
@@ -308,13 +627,40 @@ async function processVideoGeneration(jobId) {
     await new Promise(resolve => setTimeout(resolve, 5000)); // Simulate work
 
     jobs[jobId].status = 'complete';
-    jobs[jobId].videoUrl = '/login-animation.mp4'; // The final video URL
+    jobs[jobId].videoUrl = '/HD_Video_Generation_Complete.mp4'; // The final video URL
+    jobs[jobId].completedAt = Date.now();
+    jobs[jobId].title = deriveJobTitle(job.script, jobs[jobId].scenes?.[0]?.text);
     console.log(`[${jobId}] Job complete.`);
   } catch (error) {
     console.error(`[${jobId}] Error during video generation:`, error);
     jobs[jobId].status = 'failed';
+    jobs[jobId].error = 'Video generation failed. Please try again.';
+    jobs[jobId].completedAt = Date.now();
   }
 }
+
+// --- Theme Settings API Routes ---
+
+/**
+ * @route   GET /api/theme-settings
+ * @desc    Get all theme settings for the frontend
+ * @access  Public
+ */
+app.get('/api/theme-settings', (req, res) => {
+  res.json(DEFAULT_THEME_SETTINGS);
+});
+
+/**
+ * @route   PUT /api/admin/theme-settings
+ * @desc    Update theme settings from the admin panel
+ * @access  Private (Admin)
+ */
+app.put('/api/admin/theme-settings', isAdmin, (req, res) => {
+  res.status(503).json({
+    success: false,
+    message: 'Theme settings updates are temporarily disabled.'
+  });
+});
 
 // --- Centralized Error Handler ---
 // This should be the last middleware added.
