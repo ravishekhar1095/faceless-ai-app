@@ -26,6 +26,7 @@ import ThemeEditor from './admin/ThemeEditor.js';
 import Settings from './Settings.js';
 import SocialConnectPage from './SocialConnectPage.js';
 import { ThemeProvider } from './ThemeContext.js';
+import SampleLibrary from './SampleLibrary.js';
 
 function App() {
   return (
@@ -51,6 +52,7 @@ function App() {
               <Route path="projects" element={<Projects />} />
               <Route path="analytics" element={<Analytics />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="samples" element={<SampleLibrary />} />
               <Route path="about" element={<About />} />
               <Route path="documentation" element={<Documentation />} />
               <Route path="pricing" element={<Pricing />} />
