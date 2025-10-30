@@ -31,6 +31,12 @@ app.use(session({
 
 // A simple middleware to protect routes
 const isAuthenticated = (req, res, next) => req.session.user ? next() : res.status(401).json({ success: false, message: 'Unauthorized' });
+const isAdmin = (req, res, next) => {
+  if (req.session.user && req.session.user.user_type === 'admin') {
+    return next();
+  }
+  return res.status(403).json({ success: false, message: 'Admin access required.' });
+};
 
 // --- MySQL Database Connection ---
 // Use environment variables for database configuration
@@ -234,8 +240,8 @@ app.post('/api/login', async (req, res, next) => {
 
   try {
     const [rows] = await pool.execute(
-      'SELECT * FROM users WHERE username = ?',
-      [username]
+      'SELECT * FROM users WHERE username = ? OR email = ? LIMIT 1',
+      [username, username]
     );
 
     if (rows.length === 0) {
@@ -252,7 +258,8 @@ app.post('/api/login', async (req, res, next) => {
       req.session.user = {
         id: user.id,
         username: user.username,
-        credits: user.credits
+        credits: user.credits,
+        user_type: user.user_type
       };
       res.json({ success: true, message: 'Login successful!', user: req.session.user });
     } else {
@@ -260,6 +267,43 @@ app.post('/api/login', async (req, res, next) => {
     }
   } catch (error) {
     next(error); // Pass error to the centralized handler
+  }
+});
+
+app.post('/api/admin/login', async (req, res, next) => {
+  const { username, password } = req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ success: false, message: 'Username and password are required.' });
+  }
+
+  try {
+    const [rows] = await pool.execute(
+      "SELECT * FROM users WHERE (username = ? OR email = ?) AND user_type = 'admin' LIMIT 1",
+      [username, username]
+    );
+
+    if (rows.length === 0) {
+      return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
+    }
+
+    const adminUser = rows[0];
+    const isMatch = await bcrypt.compare(password, adminUser.password);
+
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Invalid admin credentials.' });
+    }
+
+    req.session.user = {
+      id: adminUser.id,
+      username: adminUser.username,
+      credits: adminUser.credits,
+      user_type: adminUser.user_type
+    };
+
+    res.json({ success: true, message: 'Admin login successful.', user: req.session.user });
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -334,8 +378,8 @@ app.post('/api/register', async (req, res, next) => {
 
     // 2. Insert the new user with the unique user_id and default credits
     await pool.execute(
-      'INSERT INTO users (user_id, username, email, password, credits) VALUES (?, ?, ?, ?, ?)',
-      [userId, username, email, hashedPassword, 10] // Assign 10 credits
+      'INSERT INTO users (user_id, username, email, password, credits, user_type) VALUES (?, ?, ?, ?, ?, ?)',
+      [userId, username, email, hashedPassword, 10, 'standard']
     );
     res.status(201).json({ success: true, message: 'Registration successful! Please log in.' });
   } catch (error) {
@@ -347,11 +391,11 @@ app.post('/api/register', async (req, res, next) => {
  * @route   GET /api/admin/users
  * @desc    Get all users (for admin panel)
  */
-app.get('/api/admin/users', isAuthenticated, async (req, res, next) => {
+app.get('/api/admin/users', isAdmin, async (req, res, next) => {
   // In a real app, this route should be protected to ensure only admins can access it.
   try {
     // Corrected to select from the 'users' table
-    const [users] = await pool.execute('SELECT id, username, email, created_at FROM users');
+    const [users] = await pool.execute('SELECT id, username, email, created_at, user_type FROM users');
     res.json(users);
   } catch (error) {
     next(error); // Pass error to the centralized handler
@@ -362,7 +406,7 @@ app.get('/api/admin/users', isAuthenticated, async (req, res, next) => {
  * @route   DELETE /api/admin/users/:id
  * @desc    Delete a user by ID
  */
-app.delete('/api/admin/users/:id', isAuthenticated, async (req, res, next) => {
+app.delete('/api/admin/users/:id', isAdmin, async (req, res, next) => {
   const { id } = req.params;
   const adminUsername = 'admin'; // In a real app, get this from the authenticated admin's session/token
 
@@ -396,7 +440,7 @@ app.delete('/api/admin/users/:id', isAuthenticated, async (req, res, next) => {
  * @route   PUT /api/admin/users/:id/credits
  * @desc    Update a user's credits
  */
-app.put('/api/admin/users/:id/credits', isAuthenticated, async (req, res, next) => {
+app.put('/api/admin/users/:id/credits', isAdmin, async (req, res, next) => {
   const { id } = req.params;
   const { credits } = req.body;
   const adminUsername = 'admin'; // In a real app, get this from the authenticated admin's session/token
@@ -425,7 +469,7 @@ app.put('/api/admin/users/:id/credits', isAuthenticated, async (req, res, next) 
  * @route   GET /api/admin/logs
  * @desc    Get all audit logs
  */
-app.get('/api/admin/logs', isAuthenticated, async (req, res, next) => {
+app.get('/api/admin/logs', isAdmin, async (req, res, next) => {
   try {
     const [logs] = await pool.execute('SELECT * FROM audit_logs ORDER BY created_at DESC');
     res.json(logs);
@@ -611,7 +655,7 @@ app.get('/api/theme-settings', (req, res) => {
  * @desc    Update theme settings from the admin panel
  * @access  Private (Admin)
  */
-app.put('/api/admin/theme-settings', isAuthenticated, (req, res) => {
+app.put('/api/admin/theme-settings', isAdmin, (req, res) => {
   res.status(503).json({
     success: false,
     message: 'Theme settings updates are temporarily disabled.'

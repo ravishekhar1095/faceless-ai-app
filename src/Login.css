@@ -421,6 +421,27 @@
   border: 1px solid rgba(34, 197, 94, 0.25);
 }
 
+.banner-info {
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.banner-link {
+  margin-left: 0.5rem;
+  background: none;
+  border: none;
+  color: #c7d2fe;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.admin-auth {
+  background: radial-gradient(circle at top left, #111827 0%, #020617 60%);
+}
+
 .auth-divider {
   display: flex;
   align-items: center;
@@ -490,6 +511,16 @@
 }
 
 .auth-switch button:hover {
+  color: #e0e7ff;
+}
+
+.auth-switch a {
+  color: #c7d2fe;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.auth-switch a:hover {
   color: #e0e7ff;
 }
 
